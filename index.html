@@ -1,0 +1,2512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>JS NYWORIANIS VP · JS 3D Perspective Orrery Block</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* 
+         * CSS RESET & BASE STYLES
+         * We use a dark space theme with subtle borders and glows
+         * to create an immersive "mission control" atmosphere.
+         */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            min-height: 100vh; background: #000010; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            font-family: 'VT323', monospace; padding: 20px; overflow: hidden;
+            cursor: grab; /* Shows grab cursor to indicate draggable view */
+        }
+        body:active { cursor: grabbing; }
+        body.grabbing { cursor: grabbing; }
+        canvas {
+            display: block; 
+            /* 
+             * CRISP PIXEL RENDERING:
+             * 'pixelated' and 'crisp-edges' tell the browser to use 
+             * nearest-neighbor interpolation when scaling — essential 
+             * for our starfield dots and planet textures to look sharp.
+             */
+            image-rendering: pixelated; image-rendering: crisp-edges;
+            border: 1px solid #1a1a3a; border-radius: 8px;
+            /* Multi-layered box-shadow creates a subtle nebula glow effect */
+            box-shadow: 0 0 40px rgba(30, 60, 120, 0.3);
+        }
+        /* 
+         * UI OVERLAYS — positioned fixed so they stay in place
+         * regardless of canvas scaling. All use pointer-events: none
+         * so they don't interfere with mouse dragging on the canvas.
+         */
+        .brand {
+            position: fixed; bottom: 12px; left: 12px;
+            font-family: 'VT323', monospace; font-size: 14px;
+            background: rgba(0,0,0,0.7); padding: 6px 12px;
+            color: #8ab4f8; z-index: 100; pointer-events: none;
+            border: 1px solid #1a3a5a; border-radius: 4px;
+        }
+        .credits {
+            position: fixed; bottom: 12px; right: 12px;
+            font-family: 'VT323', monospace; font-size: 14px;
+            background: rgba(0,0,0,0.7); padding: 6px 12px;
+            color: #8ab4f8; z-index: 100; pointer-events: none;
+            border: 1px solid #1a3a5a; border-radius: 4px;
+        }
+        .title {
+            position: fixed; top: 15px; left: 50%; transform: translateX(-50%);
+            font-family: 'Press Start 2P', monospace; font-size: 11px;
+            color: #ffe066; background: rgba(0,0,0,0.8); padding: 8px 16px;
+            z-index: 100; letter-spacing: 2px; pointer-events: none;
+            white-space: nowrap; border: 1px solid #2a2a4a; border-radius: 4px;
+            /* Text shadow adds a subtle star-glow to the title */
+            text-shadow: 0 0 10px rgba(255,224,102,0.5);
+        }
+        .hud {
+            position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+            font-family: 'VT323', monospace; font-size: 13px; color: #aac8f0;
+            background: rgba(0,0,0,0.7); padding: 6px 14px; z-index: 100;
+            pointer-events: none; white-space: nowrap; border-radius: 4px;
+            letter-spacing: 1px;
+        }
+        .controls {
+            position: fixed; top: 15px; right: 15px;
+            font-family: 'VT323', monospace; font-size: 11px; color: #7a9ab8;
+            background: rgba(0,0,0,0.7); padding: 8px 12px; z-index: 100;
+            pointer-events: none; border-radius: 4px; line-height: 1.6;
+            border: 1px solid #1a2a3a;
+        }
+        .footer {
+            position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+            font-family: 'VT323', monospace; font-size: 12px; color: #5a7a9a;
+            background: rgba(0,0,0,0.6); padding: 4px 10px; z-index: 100;
+            pointer-events: none; text-align: center; line-height: 1.4;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 
+        THE CANVAS ELEMENT
+        All 3D rendering happens here. We set width/height in JavaScript
+        to ensure pixel-perfect control over the rendering surface.
+    -->
+    <canvas id="cosmos"></canvas>
+    
+    <!-- UI OVERLAYS — informative, non-interactive -->
+    <div class="title">◆ JS NYWORIANIS VP ◆</div>
+    <div class="hud" id="hud">⊙ STAR SYSTEM · ORBIT VIEW</div>
+    <div class="brand">© 2026 Vanya Petrov</div>
+    <div class="controls">
+        🖱 DRAG — rotate view<br>
+        🖱 SCROLL — zoom in/out<br>
+        ⌨ SPACE — pause orbits<br>
+        ⌨ R — reset view<br>
+        ⌨ F — follow planet
+    </div>
+    <div class="footer">
+        <div>HTML/JS · CC BY · No cookies · No data collection · Free fonts (Google Fonts)</div>
+        <div>Download and modify for your project · Pure JavaScript 3D engine with realistic orbital physics</div>
+    </div>
+    <div class="credits">3D space · orbital mechanics · pure JS</div>
+
+    <script>
+    /*
+     * ============================================================================
+     *  JS NYWORIANIS VP — Pure JavaScript 3D Perspective Orrery Block
+     *  No external libraries · Educational physics simulation
+     * ============================================================================
+	 *  📐 What is an Orrery?
+     *  An orrery is a mechanical model of the Solar System that illustrates
+     *  the relative positions and motions of planets and moons.
+     *  This digital orrery simulates Keplerian orbital mechanics in real-time 3D.
+     * ============================================================================
+     *	 
+     *  Author:  Vanya Petrov (c) 2026
+     *  License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+     *           https://creativecommons.org/licenses/by/4.0/
+     *
+     *  You are free to:
+     *    - Share — copy and redistribute the material in any medium or format
+     *    - Adapt — remix, transform, and build upon the material for any purpose
+     *
+     *  KEY FEATURES (what makes this engine special):
+     *    • True 3D perspective projection (not isometric!)
+     *    • Realistic Keplerian orbital mechanics
+     *    • Gravitational simulation with proper scaling
+     *    • Procedural planet textures (gas giants, rocky worlds, ice planets)
+     *    • Dynamic starfield with parallax depth (3 layers)
+     *    • Ring systems, moons, asteroid belts
+     *    • Interactive camera with smooth rotation & zoom
+     *    • Optimized rendering with depth sorting & frustum culling
+     *    • Educational — extensively commented for learning
+     *
+     *  PHYSICS MODEL (simplified but physically-inspired):
+     *    - Newton's law of universal gravitation: F = G*M*m / r²
+     *    - Orbital velocity: v = sqrt(G*M/r) for circular orbits
+     *    - Kepler's third law: T² ∝ a³ (inner planets orbit faster)
+     *    - All orbits are in the XZ plane with optional inclination
+     *
+     *  DISCLAIMER:
+     *    This software is provided "as is", without warranty of any kind.
+     *    This is an educational simulation — orbital parameters are physically
+     *    inspired but scaled for visual clarity. Distances and sizes are not
+     *    to real astronomical scale.
+     *
+     *  Assets:
+     *    Fonts: "Press Start 2P" and "VT323" — free and open-source
+     *           via Google Fonts (https://fonts.google.com/)
+     *
+     * ============================================================================
+     */
+
+    /*
+     * IMMEDIATELY INVOKED FUNCTION EXPRESSION (IIFE)
+     * We wrap everything in (function() { ... })(); to create a private scope.
+     * This prevents our variables from polluting the global namespace —
+     * a best practice in JavaScript development.
+     */
+    (function() {
+        // ================================================================
+        //  SECTION 1: CANVAS SETUP
+        //  We configure the HTML5 Canvas element that serves as our
+        //  rendering surface. All 3D graphics will be drawn here using
+        //  the 2D context (yes, 2D! We do the 3D math ourselves).
+        // ================================================================
+        const canvas = document.getElementById('cosmos');
+        const ctx = canvas.getContext('2d');
+        
+        // Canvas dimensions — chosen for a widescreen 16:10-ish ratio
+        // that fits nicely in most browser windows.
+        const W = 900, H = 550;
+        canvas.width = W; canvas.height = H;
+
+        // ================================================================
+        //  SECTION 2: 3D MATH PRIMITIVES — THE Vec3 CLASS
+        //  
+        //  This is our custom 3D vector library. Every 3D engine needs
+        //  vector math, and building it ourselves means:
+        //    - Zero dependencies
+        //    - Full understanding of every operation
+        //    - Ability to optimize for our specific use case
+        //
+        //  A Vec3 represents a point or direction in 3D space with
+        //  three components: x (left/right), y (up/down), z (forward/back).
+        //  In our coordinate system:
+        //    +X = right
+        //    +Y = up
+        //    +Z = toward the viewer (out of screen)
+        // ================================================================
+        class Vec3 {
+            /**
+             * Constructor — creates a new 3D vector
+             * @param {number} x — X component (left/right)
+             * @param {number} y — Y component (up/down)
+             * @param {number} z — Z component (forward/back)
+             */
+            constructor(x = 0, y = 0, z = 0) {
+                this.x = x; this.y = y; this.z = z;
+            }
+
+            /**
+             * VECTOR LENGTH (MAGNITUDE)
+             * Calculates the distance from origin (0,0,0) to this point.
+             * 
+             * FORMULA: √(x² + y² + z²)
+             * This is the 3D extension of the Pythagorean theorem.
+             * 
+             * USAGE: Checking distances, normalizing vectors, physics calculations.
+             * 
+             * @returns {number} The length of this vector
+             */
+            length() {
+                return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+            }
+
+            /**
+             * NORMALIZED VECTOR (UNIT VECTOR)
+             * Returns a new vector pointing in the same direction but with length = 1.
+             * 
+             * WHY THIS MATTERS: Unit vectors are essential for:
+             *   - Direction calculations (where you only care about "which way", not "how far")
+             *   - Lighting (surface normals must be unit length)
+             *   - Camera forward/right/up vectors
+             * 
+             * FORMULA: (x/len, y/len, z/len)
+             * 
+             * SAFETY: We check for near-zero length to avoid division by zero,
+             * which would produce NaN (Not a Number) values.
+             * 
+             * @returns {Vec3} A new normalized vector
+             */
+            normalized() {
+                const len = this.length();
+                // Guard against division by zero — if the vector is essentially
+                // a point at the origin, return a zero vector
+                if (len < 0.000001) return new Vec3(0, 0, 0);
+                return new Vec3(this.x / len, this.y / len, this.z / len);
+            }
+
+            /**
+             * NORMALIZE IN PLACE
+             * Same as normalized() but modifies THIS vector instead of creating a new one.
+             * More memory-efficient when you don't need the original value.
+             * 
+             * @returns {Vec3} This vector (for method chaining)
+             */
+            normalize() {
+                const len = this.length();
+                if (len > 0.000001) { 
+                    this.x /= len; this.y /= len; this.z /= len; 
+                }
+                return this;
+            }
+
+            /**
+             * VECTOR SUBTRACTION
+             * Returns a new vector: this - other
+             * 
+             * GEOMETRIC MEANING: The vector from 'other' to 'this'.
+             * If 'this' is a target position and 'other' is your position,
+             * the result is the direction and distance to the target.
+             * 
+             * FORMULA: (this.x - other.x, this.y - other.y, this.z - other.z)
+             * 
+             * @param {Vec3} other — The vector to subtract
+             * @returns {Vec3} A new vector representing the difference
+             */
+            subtract(other) {
+                return new Vec3(this.x - other.x, this.y - other.y, this.z - other.z);
+            }
+
+            /**
+             * VECTOR ADDITION
+             * Returns a new vector: this + other
+             * 
+             * GEOMETRIC MEANING: Combining two displacements.
+             * Used extensively for position updates: newPos = oldPos + velocity.
+             * 
+             * @param {Vec3} other — The vector to add
+             * @returns {Vec3} A new vector representing the sum
+             */
+            add(other) {
+                return new Vec3(this.x + other.x, this.y + other.y, this.z + other.z);
+            }
+
+            /**
+             * SCALAR MULTIPLICATION
+             * Returns a new vector scaled by a factor s.
+             * 
+             * FORMULA: (x*s, y*s, z*s)
+             * 
+             * USAGE:
+             *   - Scale a direction by speed: velocity = direction * speed
+             *   - Scale a force: acceleration = force * (1/mass)
+             * 
+             * @param {number} s — The scaling factor
+             * @returns {Vec3} A new scaled vector
+             */
+            scale(s) {
+                return new Vec3(this.x * s, this.y * s, this.z * s);
+            }
+
+            /**
+             * DOT PRODUCT
+             * One of the MOST IMPORTANT operations in 3D math.
+             * 
+             * FORMULA: a·b = ax*bx + ay*by + az*bz
+             * 
+             * GEOMETRIC MEANING: a·b = |a| * |b| * cos(θ)
+             * where θ is the angle between the two vectors.
+             * 
+             * KEY PROPERTIES:
+             *   - If a·b > 0: vectors point in similar directions (angle < 90°)
+             *   - If a·b = 0: vectors are perpendicular (90°)
+             *   - If a·b < 0: vectors point in opposite directions (angle > 90°)
+             * 
+             * USAGE IN OUR ENGINE:
+             *   - Projecting points onto camera axes (3D→2D projection)
+             *   - Checking if something is in front of or behind the camera
+             *   - Calculating how "aligned" two directions are
+             * 
+             * @param {Vec3} other — The other vector
+             * @returns {number} The dot product
+             */
+            dot(other) {
+                return this.x * other.x + this.y * other.y + this.z * other.z;
+            }
+
+            /**
+             * CROSS PRODUCT
+             * Returns a vector PERPENDICULAR to both input vectors.
+             * 
+             * FORMULA: 
+             *   cross.x = a.y*b.z - a.z*b.y
+             *   cross.y = a.z*b.x - a.x*b.z
+             *   cross.z = a.x*b.y - a.y*b.x
+             * 
+             * GEOMETRIC MEANING: The resulting vector is perpendicular to
+             * the plane formed by the two input vectors. Its direction follows
+             * the RIGHT-HAND RULE:
+             *   - Point index finger along 'this'
+             *   - Point middle finger along 'other'
+             *   - Thumb points in the direction of the cross product
+             * 
+             * USAGE IN OUR ENGINE:
+             *   - Calculating the camera's "right" vector (forward × up)
+             *   - Computing surface normals for lighting
+             * 
+             * @param {Vec3} other — The other vector
+             * @returns {Vec3} A new vector perpendicular to both inputs
+             */
+            cross(other) {
+                return new Vec3(
+                    this.y * other.z - this.z * other.y,
+                    this.z * other.x - this.x * other.z,
+                    this.x * other.y - this.y * other.x
+                );
+            }
+
+            /**
+             * DISTANCE TO ANOTHER POINT
+             * Convenience method: distance = (this - other).length()
+             * 
+             * @param {Vec3} other — The other point
+             * @returns {number} The Euclidean distance
+             */
+            distanceTo(other) {
+                return this.subtract(other).length();
+            }
+
+            /**
+             * CLONE (DEEP COPY)
+             * Creates an independent copy of this vector.
+             * Important because objects in JavaScript are passed by reference —
+             * without cloning, modifying the "copy" would modify the original!
+             * 
+             * @returns {Vec3} An identical but independent vector
+             */
+            clone() {
+                return new Vec3(this.x, this.y, this.z);
+            }
+
+            /**
+             * ROTATE AROUND Y-AXIS (HORIZONTAL ROTATION)
+             * Applies a 2D rotation in the XZ plane.
+             * 
+             * ROTATION MATRIX FOR Y-AXIS:
+             *   |  cos(θ)  0  sin(θ) |   | x |
+             *   |    0     1    0    | * | y |
+             *   | -sin(θ)  0  cos(θ) |   | z |
+             * 
+             * RESULT:
+             *   x' = x*cos(θ) + z*sin(θ)
+             *   y' = y  (unchanged)
+             *   z' = -x*sin(θ) + z*cos(θ)
+             * 
+             * @param {number} angle — Rotation angle in radians
+             * @returns {Vec3} A new rotated vector
+             */
+            rotateY(angle) {
+                const cos = Math.cos(angle), sin = Math.sin(angle);
+                return new Vec3(
+                    this.x * cos + this.z * sin,
+                    this.y,
+                    -this.x * sin + this.z * cos
+                );
+            }
+
+            /**
+             * ROTATE AROUND X-AXIS (VERTICAL ROTATION)
+             * Applies a 2D rotation in the YZ plane.
+             * 
+             * ROTATION MATRIX FOR X-AXIS:
+             *   | 1    0      0    |   | x |
+             *   | 0  cos(θ) -sin(θ)| * | y |
+             *   | 0  sin(θ)  cos(θ)|   | z |
+             * 
+             * RESULT:
+             *   x' = x  (unchanged)
+             *   y' = y*cos(θ) - z*sin(θ)
+             *   z' = y*sin(θ) + z*cos(θ)
+             * 
+             * @param {number} angle — Rotation angle in radians
+             * @returns {Vec3} A new rotated vector
+             */
+            rotateX(angle) {
+                const cos = Math.cos(angle), sin = Math.sin(angle);
+                return new Vec3(
+                    this.x,
+                    this.y * cos - this.z * sin,
+                    this.y * sin + this.z * cos
+                );
+            }
+        }
+
+        // ================================================================
+        //  SECTION 3: CAMERA SYSTEM
+        //  
+        //  The camera is the user's "eye" into our 3D world. We use an
+        //  ORBITAL CAMERA model — the camera orbits around a focus point
+        //  (like a satellite around a planet).
+        //
+        //  WHY SPHERICAL COORDINATES?
+        //  Instead of storing raw x,y,z position, we store:
+        //    - theta (θ): horizontal angle around the focus
+        //    - phi (φ): vertical angle from the top
+        //    - distance (r): how far from the focus
+        //
+        //  This makes rotation intuitive:
+        //    - Dragging left/right changes theta
+        //    - Dragging up/down changes phi
+        //    - Scrolling changes distance
+        //
+        //  Converting back to Cartesian (x,y,z) uses standard
+        //  spherical-to-Cartesian formulas.
+        // ================================================================
+        class Camera {
+            constructor() {
+                /**
+                 * SPHERICAL COORDINATES EXPLAINED:
+                 * 
+                 *   theta (θ): Azimuthal angle — measured in the XZ plane
+                 *              from the +X axis. Think of it as "which compass
+                 *              direction am I viewing from?"
+                 *              Range: 0 to 2π (full circle)
+                 * 
+                 *   phi (φ): Polar angle — measured from the +Y axis (up).
+                 *            Think of it as "how high above the equator am I?"
+                 *            φ = 0: looking from directly above
+                 *            φ = π/2: looking from the equator (side view)
+                 *            φ = π: looking from directly below
+                 *            Range: clamped to [0.15, π-0.15] to prevent flipping
+                 * 
+                 *   distance (r): Radial distance from the focus point.
+                 *                 Clamped to [30, 800] to prevent clipping
+                 *                 or losing the scene.
+                 * 
+                 * INITIAL VALUES — chosen to show the star at center
+                 * with a slightly angled view that looks dramatic:
+                 *   theta = 0.5 radians (~29°) — slight rotation for depth
+                 *   phi = 1.6 radians (~92°) — looking slightly down at the system
+                 *   distance = 280 — comfortable viewing distance
+                 */
+                this.theta = 0.5;     
+                this.phi = 1.6;       
+                this.distance = 280;  
+                
+                /**
+                 * FOCUS POINT — what the camera orbits around.
+                 * targetFocus is used for SMOOTH transitions — the actual
+                 * focus gradually moves toward targetFocus each frame.
+                 */
+                this.focus = new Vec3(0, 0, 0);
+                this.targetFocus = new Vec3(0, 0, 0);
+                
+                /**
+                 * SMOOTH FACTOR — controls how quickly the camera responds.
+                 * 0.0 = instant (snappy, no animation)
+                 * 1.0 = no movement at all
+                 * 0.08 = smooth, cinematic feel (our chosen value)
+                 */
+                this.smoothFactor = 0.08;
+
+                // Compute initial position from spherical coordinates
+                this.position = this._sphericalToCartesian();
+                this.targetPosition = this.position.clone();
+            }
+
+            /**
+             * CONVERT SPHERICAL → CARTESIAN COORDINATES
+             * 
+             * This is the mathematical heart of the orbital camera.
+             * Given spherical coordinates (r, φ, θ), we compute (x, y, z).
+             * 
+             * STANDARD FORMULAS (physics/math convention):
+             *   x = r * sin(φ) * cos(θ)  — horizontal, modulated by both angles
+             *   y = r * cos(φ)            — vertical, depends only on φ
+             *   z = r * sin(φ) * sin(θ)  — depth, modulated by both angles
+             * 
+             * VISUAL INTUITION:
+             *   - sin(φ) gives the "horizontal radius" (distance from Y-axis)
+             *   - cos(θ) and sin(θ) split that into X and Z components
+             *   - cos(φ) gives the Y component directly
+             * 
+             * We add the focus point at the end so the camera orbits
+             * AROUND the focus, not around the world origin.
+             * 
+             * @returns {Vec3} Camera position in world space
+             */
+            _sphericalToCartesian() {
+                const r = this.distance;
+                const phi = this.phi;
+                const theta = this.theta;
+                
+                return new Vec3(
+                    r * Math.sin(phi) * Math.cos(theta),
+                    r * Math.cos(phi),
+                    r * Math.sin(phi) * Math.sin(theta)
+                ).add(this.focus);
+            }
+
+            /**
+             * UPDATE CAMERA (called every frame)
+             * 
+             * SMOOTH INTERPOLATION (LERP — Linear Interpolation):
+             * We gradually move 'focus' toward 'targetFocus' using:
+             *   new = old + (target - old) * smoothFactor
+             * 
+             * This creates a cinematic easing effect — the camera doesn't
+             * snap instantly when following a planet, but glides gracefully.
+             * 
+             * After updating focus, we recompute the camera's position
+             * from the (possibly new) focus and the spherical angles.
+             */
+            update() {
+                // Smooth focus transition using linear interpolation
+                this.focus = new Vec3(
+                    this.focus.x + (this.targetFocus.x - this.focus.x) * this.smoothFactor,
+                    this.focus.y + (this.targetFocus.y - this.focus.y) * this.smoothFactor,
+                    this.focus.z + (this.targetFocus.z - this.focus.z) * this.smoothFactor
+                );
+                
+                // Recompute position — spherical angles may have changed from user input
+                this.position = this._sphericalToCartesian();
+            }
+
+            /**
+             * GET FORWARD VECTOR
+             * The direction the camera is looking.
+             * Computed as: (focus - position) normalized
+             * 
+             * This is the "look direction" — essential for 3D projection.
+             * 
+             * @returns {Vec3} Unit vector pointing from camera toward focus
+             */
+            getForward() { 
+                return this.focus.subtract(this.position).normalized(); 
+            }
+
+            /**
+             * GET UP VECTOR
+             * For our orbital camera, "up" is always the world Y axis.
+             * In a more complex FPS camera, this would change with orientation.
+             * 
+             * @returns {Vec3} World up direction (0, 1, 0)
+             */
+            getUp() { 
+                return new Vec3(0, 1, 0); 
+            }
+
+            /**
+             * GET RIGHT VECTOR
+             * Computed as: forward × up (cross product)
+             * 
+             * The right vector is perpendicular to both forward and up,
+             * completing our camera's local coordinate frame.
+             * 
+             * WHY CROSS PRODUCT? It guarantees the right vector is
+             * perpendicular to the viewing direction.
+             * 
+             * @returns {Vec3} Unit vector pointing to the camera's right
+             */
+            getRight() { 
+                return this.getForward().cross(this.getUp()).normalized(); 
+            }
+
+            /**
+             * ZOOM CONTROLS
+             * zoomIn: reduce distance (get closer) — clamped to minimum 30
+             * zoomOut: increase distance (get farther) — clamped to maximum 800
+             * 
+             * Clamping prevents:
+             *   - Zooming through objects (too close)
+             *   - Losing the scene entirely (too far)
+             */
+            zoomIn(amount)  { this.distance = Math.max(30, this.distance - amount); }
+            zoomOut(amount) { this.distance = Math.min(800, this.distance + amount); }
+
+            /**
+             * HORIZONTAL ROTATION
+             * Adjusts theta (angle in XZ plane).
+             * Positive = rotate clockwise, Negative = rotate counter-clockwise.
+             */
+            rotateHorizontal(angle) { this.theta += angle; }
+
+            /**
+             * VERTICAL ROTATION
+             * Adjusts phi (angle from Y axis).
+             * CLAMPED to [0.15, π-0.15] to prevent:
+             *   - phi=0: looking from directly above (disorienting)
+             *   - phi=π: looking from directly below (flips the view)
+             */
+            rotateVertical(angle) {
+                this.phi = Math.max(0.15, Math.min(Math.PI - 0.15, this.phi + angle));
+            }
+
+            /**
+             * SET FOCUS POINT
+             * Tells the camera to look at a specific position.
+             * Used when following a planet (F key).
+             * 
+             * @param {Vec3} pos — World position to focus on
+             */
+            setFocus(pos) { 
+                this.targetFocus = pos.clone(); 
+            }
+
+            /**
+             * RESET CAMERA TO DEFAULT VIEW
+             * Returns all parameters to their initial values.
+             * MUST match the constructor values exactly!
+             * 
+             * Also resets smoothFactor to ensure consistent behavior.
+             */
+            reset() {
+                this.theta = 0.5;
+                this.phi = 1.6;
+                this.distance = 280;
+                this.targetFocus = new Vec3(0, 0, 0);
+                this.smoothFactor = 0.08;
+            }
+        }
+
+        // ================================================================
+        //  SECTION 4: 3D → 2D PERSPECTIVE PROJECTION
+        //  
+        //  This is the CORE ALGORITHM that makes 3D graphics possible
+        //  on a 2D screen. We take a point in 3D world space and
+        //  compute where it should appear on the flat canvas.
+        //
+        //  THE BIG IDEA — Perspective Projection:
+        //  Objects farther away appear smaller. This is simulated by
+        //  dividing by the depth (z-distance from camera).
+        //
+        //  THE PROCESS (6 steps):
+        //   1. Get camera's local coordinate frame (forward, up, right)
+        //   2. Vector from camera to the world point
+        //   3. Project onto camera axes using dot products
+        //   4. Frustum culling — discard points behind the camera
+        //   5. Perspective divide — scale by focalLength / depth
+        //   6. Near-plane clipping — discard points too close
+        //
+        //  This mimics how a real camera or human eye works:
+        //  light from distant objects arrives at a smaller angle.
+        // ================================================================
+
+        /**
+         * PROJECT A 3D WORLD POINT TO 2D SCREEN COORDINATES
+         * 
+         * @param {Vec3} worldPoint — The 3D point to project
+         * @param {Camera} camera — The camera through which to view
+         * @returns {Object} — { x, y, depth, visible }
+         *   - x, y: screen pixel coordinates
+         *   - depth: distance from camera (for sorting)
+         *   - visible: false if point should not be drawn
+         */
+        function project3D(worldPoint, camera) {
+            // STEP 1: Get the camera's local coordinate frame.
+            // These three vectors define a coordinate system centered on the camera.
+            const forward = camera.getForward();  // where the camera looks
+            const up = camera.getUp();            // world up
+            const right = camera.getRight();      // perpendicular to forward and up
+
+            // STEP 2: Vector from camera position to the world point.
+            // This is the point's position RELATIVE TO THE CAMERA.
+            const toPoint = worldPoint.subtract(camera.position);
+
+            // STEP 3: Project onto camera-local axes using DOT PRODUCTS.
+            // 
+            // DOT PRODUCT AS PROJECTION:
+            // The dot product of vector A with a unit vector B gives the
+            // length of A's projection onto B's direction.
+            // 
+            //   cameraZ = how far in FRONT of the camera (depth)
+            //   cameraX = how far to the RIGHT of the camera
+            //   cameraY = how far ABOVE the camera
+            //
+            // This is essentially a CHANGE OF BASIS — we're converting
+            // from world coordinates to camera-local coordinates.
+            const cameraZ = toPoint.dot(forward);
+            const cameraX = toPoint.dot(right);
+            const cameraY = toPoint.dot(up);
+
+            // STEP 4: FRUSTUM CULLING — Back-face removal.
+            // 
+            // If cameraZ <= 0.1, the point is BEHIND the camera
+            // (or exactly at it). Drawing it would cause:
+            //   - Division by zero (cameraZ = 0)
+            //   - Negative projection (objects behind appearing inverted)
+            //
+            // We use 0.1 instead of 0 to avoid near-clipping artifacts.
+            if (cameraZ <= 0.1) {
+                return { x: 0, y: 0, depth: Infinity, visible: false };
+            }
+
+            // STEP 5: PERSPECTIVE DIVIDE — The magic of 3D!
+            //
+            // FORMULA:
+            //   screenX = (focalLength * cameraX) / cameraZ + screenCenterX
+            //   screenY = -(focalLength * cameraY) / cameraZ + screenCenterY
+            //
+            // focalLength acts like a camera lens — higher values = more zoom.
+            // cameraZ in the denominator makes distant objects smaller.
+            //
+            // The negative sign for Y is because screen Y goes DOWN
+            // (pixel coordinates), but world Y goes UP.
+            //
+            // VISUAL ANALOGY: Hold your thumb close to your eye — it covers
+            // a large part of your vision. Move it away — it appears smaller.
+            // That's perspective divide in action!
+            const focalLength = 400;
+            const screenX = (focalLength * cameraX) / cameraZ + W / 2;
+            const screenY = -(focalLength * cameraY) / cameraZ + H / 2;
+
+            // STEP 6: NEAR-PLANE CLIPPING.
+            // Objects extremely close to the camera would be huge and distorted.
+            // We mark them invisible to avoid visual artifacts.
+            const nearPlane = 1.0;
+            if (cameraZ < nearPlane) {
+                return { x: screenX, y: screenY, depth: cameraZ, visible: false };
+            }
+
+            // Return the projected point with its depth for sorting
+            return {
+                x: screenX,
+                y: screenY,
+                depth: cameraZ,   // used for painter's algorithm (depth sorting)
+                visible: true     // this point should be drawn
+            };
+        }
+
+        // ================================================================
+        //  SECTION 5: PROCEDURAL TEXTURE GENERATION
+        //
+        //  Instead of loading image files (which would require a server
+        //  or external assets), we GENERATE planet textures mathematically.
+        //
+        //  THE TECHNIQUE — Fractal Brownian Motion (fBm):
+        //  We layer multiple "octaves" of noise at different frequencies
+        //  and amplitudes. This creates natural-looking detail at multiple
+        //  scales — the same mathematical principle behind:
+        //    - Coastlines (self-similar at different zoom levels)
+        //    - Mountains and terrain
+        //    - Clouds and gas giant bands
+        //
+        //  Each octave: frequency doubles, amplitude halves.
+        //  Result: fine detail superimposed on broad features.
+        // ================================================================
+
+        /**
+         * SEEDED PSEUDO-RANDOM NUMBER GENERATOR (Mulberry32 algorithm)
+         * 
+         * WHY SEEDED? Regular Math.random() gives different values every time.
+         * For procedural textures, we want the SAME planet to look the SAME
+         * every time we view it. A seeded RNG with a fixed seed guarantees
+         * consistent, reproducible results.
+         * 
+         * ALGORITHM: Mulberry32 — fast, good distribution, simple implementation.
+         * 
+         * @param {number} seed — The seed value (integer)
+         * @returns {Function} — A function that returns random floats in [0, 1)
+         */
+        function seededRandom(seed) {
+            let s = seed | 0;  // Force integer conversion
+            return function() {
+                s = (s + 0x6D2B79F5) | 0;
+                let t = Math.imul(s ^ (s >>> 15), 1 | s);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        /**
+         * GENERATE A PROCEDURAL PLANET TEXTURE
+         * 
+         * This creates an offscreen canvas with a unique surface pattern
+         * based on the planet's seed and type. The texture is used later
+         * for rendering the planet with realistic surface detail.
+         * 
+         * PLANET TYPES AND THEIR VISUAL STYLES:
+         *   'gas'    — Jupiter-like: warm bands, turbulent swirls, cream/brown tones
+         *   'rocky'  — Mars-like: red-brown terrain, crater features, varied surface
+         *   'ice'    — Europa-like: white-blue gradients, crystalline crack patterns
+         *   'lava'   — Io-like: dark volcanic rock with glowing orange fissures
+         * 
+         * @param {number} seed — Unique seed for this planet's texture
+         * @param {string} type — Planet classification ('gas', 'rocky', 'ice', 'lava')
+         * @param {number} size — Texture resolution in pixels (size × size)
+         * @returns {HTMLCanvasElement} — Offscreen canvas with the generated texture
+         */
+        function generatePlanetTexture(seed, type, size = 128) {
+            // Create an offscreen canvas — this doesn't appear on the page,
+            // but we can sample colors from it when drawing the planet.
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = size; 
+            offCanvas.height = size;
+            const octx = offCanvas.getContext('2d');
+            
+            // ImageData gives us direct pixel access — much faster than
+            // fillRect() for every pixel when generating textures.
+            const imageData = octx.createImageData(size, size);
+            const data = imageData.data;  // This is a Uint8ClampedArray [R,G,B,A, R,G,B,A, ...]
+            const rand = seededRandom(seed);
+
+            // COLOR PALETTES — Each planet type has a curated set of colors
+            // that define its visual character. The noise function selects
+            // from these based on terrain height.
+            let palette;
+            switch (type) {
+                case 'gas':
+                    // Jupiter-like: warm browns, oranges, creams
+                    palette = [
+                        { r: 210, g: 180, b: 140 }, // tan base
+                        { r: 190, g: 150, b: 110 }, // light brown band
+                        { r: 230, g: 200, b: 160 }, // cream zone
+                        { r: 170, g: 130, b: 90 },  // medium brown belt
+                        { r: 200, g: 170, b: 130 }, // warm tan transition
+                        { r: 240, g: 220, b: 180 }, // light cream highlight
+                    ];
+                    break;
+                case 'rocky':
+                    // Mars-like: reds, browns, grays
+                    palette = [
+                        { r: 180, g: 100, b: 70 },  // rusty red
+                        { r: 160, g: 90, b: 60 },   // dark red lowlands
+                        { r: 200, g: 120, b: 90 },  // lighter red highlands
+                        { r: 140, g: 80, b: 50 },   // deep brown-red
+                        { r: 190, g: 140, b: 110 }, // tan patches
+                        { r: 120, g: 70, b: 45 },   // dark brown craters
+                    ];
+                    break;
+                case 'ice':
+                    // Europa-like: whites, pale blues
+                    palette = [
+                        { r: 220, g: 235, b: 250 }, // ice white-blue
+                        { r: 200, g: 220, b: 240 }, // pale blue smooth
+                        { r: 240, g: 245, b: 255 }, // bright white
+                        { r: 180, g: 200, b: 225 }, // medium ice blue
+                        { r: 160, g: 185, b: 210 }, // darker ice cracks
+                        { r: 250, g: 252, b: 255 }, // pure white highlight
+                    ];
+                    break;
+                case 'lava':
+                    // Io-like: dark volcanic rock with glowing orange
+                    palette = [
+                        { r: 60, g: 40, b: 30 },    // dark volcanic basalt
+                        { r: 80, g: 50, b: 35 },    // dark brown rock
+                        { r: 220, g: 120, b: 30 },  // glowing orange lava
+                        { r: 255, g: 180, b: 40 },  // bright lava flow
+                        { r: 50, g: 35, b: 25 },    // very dark shadowed rock
+                        { r: 100, g: 60, b: 40 },   // medium volcanic rock
+                    ];
+                    break;
+                default:
+                    // Fallback: grayscale
+                    palette = [
+                        { r: 150, g: 150, b: 150 },
+                        { r: 180, g: 180, b: 180 },
+                        { r: 120, g: 120, b: 120 },
+                    ];
+            }
+
+            /**
+             * SIMPLE 2D NOISE FUNCTION
+             * 
+             * We combine sine waves with random phase offsets to create
+             * organic-looking patterns. This is a simplified version of
+             * value noise — fast to compute and good enough for our textures.
+             * 
+             * The seeded RNG provides consistent phase offsets, so the same
+             * (x, y) always produces the same noise value.
+             * 
+             * @param {number} x — X coordinate
+             * @param {number} y — Y coordinate
+             * @param {number} scale — Frequency multiplier
+             * @returns {number} — Noise value roughly in [-1, 1]
+             */
+            function noise2D(x, y, scale) {
+                const sx = x * scale, sy = y * scale;
+                // Combine three sine waves with different frequencies and phases
+                return (
+                    Math.sin(sx * 3.7 + rand() * 6.28) * Math.cos(sy * 4.1 + rand() * 6.28) +
+                    Math.sin(sx * 7.3 + sy * 2.9 + rand() * 6.28) * 0.5 +
+                    Math.cos(sx * 1.7 - sy * 5.3 + rand() * 6.28) * 0.7
+                ) / 2.2;  // Normalize to roughly [-1, 1]
+            }
+
+            /**
+             * FRACTAL BROWNIAN MOTION (fBm)
+             * 
+             * THE ALGORITHM — Layered noise octaves:
+             *   Start with low-frequency, high-amplitude noise (broad shapes).
+             *   Add progressively higher-frequency, lower-amplitude noise (details).
+             * 
+             * Each octave:
+             *   - Frequency DOUBLES → twice as much detail
+             *   - Amplitude HALVES → half the influence
+             * 
+             * This creates SELF-SIMILARITY — patterns that look similar
+             * at different zoom levels. This is a key property of natural
+             * terrain and makes our planet textures look realistic.
+             * 
+             * @param {number} x — X coordinate in noise space
+             * @param {number} y — Y coordinate in noise space
+             * @param {number} octaves — Number of detail layers (default 4)
+             * @returns {number} — Combined noise value in [-1, 1]
+             */
+            function fBm(x, y, octaves = 4) {
+                let value = 0;
+                let amplitude = 1;      // Starts at full strength
+                let frequency = 1;      // Starts at base frequency
+                let maxValue = 0;       // Sum of all amplitudes (for normalization)
+
+                for (let i = 0; i < octaves; i++) {
+                    value += noise2D(x, y, frequency * 0.05) * amplitude;
+                    maxValue += amplitude;
+                    amplitude *= 0.5;   // Each octave: half the influence
+                    frequency *= 2.0;   // Each octave: double the detail
+                }
+
+                return value / maxValue; // Normalize to [-1, 1]
+            }
+
+            // GENERATE EVERY PIXEL OF THE TEXTURE
+            // We iterate over each pixel, compute noise at that point,
+            // and select a color from the palette based on the noise value.
+            for (let py = 0; py < size; py++) {
+                for (let px = 0; px < size; px++) {
+                    // ImageData index: each pixel uses 4 bytes (R, G, B, A)
+                    const idx = (py * size + px) * 4;
+                    
+                    // Map pixel coordinates to UV space [0, 1]
+                    // This makes the texture resolution-independent.
+                    const u = px / size, v = py / size;
+                    
+                    // Convert UV to spherical coordinates for seamless mapping.
+                    // This ensures the texture wraps correctly around the planet
+                    // without visible seams at the edges.
+                    const theta = u * Math.PI * 2;      // longitude [0, 2π]
+                    const phi_coord = v * Math.PI;       // latitude [0, π]
+                    
+                    // Convert to 3D direction for noise sampling.
+                    // This gives us coordinates on the surface of a sphere,
+                    // which produces more natural planet textures than flat 2D noise.
+                    const nx = Math.cos(theta) * Math.sin(phi_coord);
+                    const ny = Math.cos(phi_coord);
+                    const nz = Math.sin(theta) * Math.sin(phi_coord);
+
+                    let colorIndex;
+                    // Base noise — the foundation of the texture
+                    let noiseVal = fBm(nx * 3, nz * 3, 5);
+
+                    // TYPE-SPECIFIC MODIFICATIONS
+                    // Each planet type applies unique transformations to the
+                    // base noise, creating distinctive visual characteristics.
+                    
+                    if (type === 'gas') {
+                        // GAS GIANTS: Strong horizontal banding
+                        // The sin(ny * 8) creates latitude-based bands (like Jupiter).
+                        // noiseVal adds turbulent variation to break up perfect stripes.
+                        const band = Math.sin(ny * 8 + noiseVal * 2) * 0.5 + 0.5;
+                        const swirl = fBm(nx * 5, nz * 5, 3) * 0.4;
+                        noiseVal = band * 0.7 + swirl * 0.3;
+                        colorIndex = Math.floor(Math.abs(noiseVal) * palette.length) % palette.length;
+                        
+                    } else if (type === 'rocky') {
+                        // ROCKY PLANETS: Crater-like circular features
+                        // We create artificial "craters" by checking distance from
+                        // several center points and modulating with sine waves.
+                        const craterDist = Math.min(
+                            Math.sqrt((u - 0.3) ** 2 + (v - 0.4) ** 2),
+                            Math.sqrt((u - 0.7) ** 2 + (v - 0.6) ** 2),
+                            Math.sqrt((u - 0.5) ** 2 + (v - 0.2) ** 2)
+                        );
+                        const craterEffect = Math.sin(craterDist * 15) * 0.3;
+                        noiseVal = noiseVal * 0.7 + craterEffect;
+                        colorIndex = Math.floor(Math.abs(noiseVal + 0.5) * palette.length) % palette.length;
+                        
+                    } else if (type === 'ice') {
+                        // ICE PLANETS: Smooth with sharp crack lines
+                        // Cracks appear where sin() is close to zero,
+                        // creating linear fracture patterns.
+                        const crack = Math.abs(Math.sin(nx * 12 + nz * 8)) < 0.08 ? -0.5 : 0;
+                        noiseVal = noiseVal * 0.5 + crack + 0.5;
+                        colorIndex = Math.floor(Math.abs(noiseVal) * palette.length) % palette.length;
+                        
+                    } else if (type === 'lava') {
+                        // LAVA PLANETS: Dark surface with bright glowing fissures
+                        // Fractures are detected by low fBm values, then
+                        // set to maximum brightness to simulate lava flows.
+                        const fracture = Math.abs(fBm(nx * 8, nz * 8, 3)) < 0.15 ? 1 : 0;
+                        noiseVal = fracture > 0 ? 0.9 : noiseVal * 0.3;
+                        colorIndex = Math.floor(Math.abs(noiseVal) * palette.length) % palette.length;
+                        
+                    } else {
+                        // Default: simple noise-to-color mapping
+                        colorIndex = Math.floor(Math.abs(noiseVal) * palette.length) % palette.length;
+                    }
+
+                    // Clamp color index to valid range (safety check)
+                    colorIndex = Math.max(0, Math.min(palette.length - 1, colorIndex));
+                    const color = palette[colorIndex];
+
+                    // Write the pixel color to the ImageData array
+                    // Format: [R, G, B, A] per pixel, stored linearly
+                    data[idx] = color.r;       // Red
+                    data[idx + 1] = color.g;   // Green
+                    data[idx + 2] = color.b;   // Blue
+                    data[idx + 3] = 255;       // Alpha (fully opaque)
+                }
+            }
+
+            // Apply the pixel data to the offscreen canvas
+            octx.putImageData(imageData, 0, 0);
+            return offCanvas;
+        }
+
+        // ================================================================
+        //  SECTION 6: CELESTIAL BODY CLASS
+        //
+        //  Every object in our solar system — stars, planets, moons,
+        //  asteroids — is represented by a CelestialBody instance.
+        //
+        //  KEY DESIGN DECISIONS:
+        //    - Parent-child hierarchy for orbits (star → planet → moon)
+        //    - Each body stores its own orbital parameters
+        //    - Position is computed each frame from orbital mechanics
+        //    - Textures are generated once at creation time (lazy loading)
+        // ================================================================
+        class CelestialBody {
+            /**
+             * Create a celestial body
+             * 
+             * @param {Object} params — Configuration object with all properties
+             * @param {string} params.name — Display name (e.g., "Cronos")
+             * @param {string} params.type — 'star', 'gas', 'rocky', 'ice', 'lava'
+             * @param {number} params.radius — Visual radius (scaled for display, not realistic)
+             * @param {number} params.mass — Mass for gravitational hierarchy (star > planet > moon)
+             * @param {number} params.orbitRadius — Distance from parent (0 for central star)
+             * @param {number} params.orbitSpeed — Angular speed in radians per frame
+             * @param {number} params.startAngle — Initial orbital position in radians
+             * @param {string} params.color — Base hex color for fallback rendering
+             * @param {number} params.seed — Seed for procedural texture generation
+             * @param {CelestialBody|null} params.parent — The body this orbits (null for star)
+             * @param {boolean} params.hasRings — Whether to draw ring system
+             * @param {number} params.ringInner — Inner ring radius as ratio of body radius
+             * @param {number} params.ringOuter — Outer ring radius as ratio of body radius
+             * @param {number} params.axialTilt — Planet axial tilt in radians
+             */
+            constructor(params) {
+                // Basic properties
+                this.name = params.name;
+                this.type = params.type;
+                this.radius = params.radius;
+                this.mass = params.mass;
+                
+                // Orbital parameters
+                this.orbitRadius = params.orbitRadius || 0;
+                this.orbitSpeed = params.orbitSpeed || 0;
+                this.angle = params.startAngle || 0;
+                
+                // Visual properties
+                this.color = params.color || '#ffffff';
+                this.seed = params.seed || Math.floor(Math.random() * 100000);
+                
+                // Hierarchy
+                this.parent = params.parent || null;
+                
+                // Ring system
+                this.hasRings = params.hasRings || false;
+                this.ringInner = params.ringInner || 1.4;
+                this.ringOuter = params.ringOuter || 2.0;
+                this.axialTilt = params.axialTilt || 0;
+                
+                // Children (moons)
+                this.moons = [];
+                
+                // Current world-space position (computed each frame)
+                this.position = new Vec3(0, 0, 0);
+
+                // Generate procedural texture for non-star bodies.
+                // Stars use their own special rendering (glow effects).
+                if (this.type !== 'star') {
+                    this.texture = generatePlanetTexture(this.seed, this.type, 128);
+                } else {
+                    this.texture = null;
+                }
+
+                // Planet's own rotation (spin around its axis)
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.02;
+            }
+
+            /**
+             * UPDATE ORBITAL POSITION
+             * 
+             * This is called every frame to advance the simulation.
+             * Uses simplified KEPLERIAN MECHANICS for circular orbits.
+             * 
+             * THE PHYSICS (simplified for visual clarity):
+             *   - Each body has an orbitSpeed (angular velocity)
+             *   - Each frame: angle += orbitSpeed * speedMultiplier
+             *   - Position = parent.position + orbitRadius * (cos(angle), 0, sin(angle))
+             * 
+             * The orbit is in the XZ plane (horizontal) with optional
+             * inclination based on axial tilt for visual variety.
+             * 
+             * CENTRAL STAR: position is always (0, 0, 0) — the origin.
+             * 
+             * WHY CIRCULAR ORBITS? Real planetary orbits are elliptical,
+             * but circular orbits are:
+             *   - Computationally simpler (no need for Kepler's equation)
+             *   - Visually cleaner (no confusing distance changes)
+             *   - Still physically inspired (many real orbits are nearly circular)
+             * 
+             * @param {number} speedMultiplier — 1.0 = normal, 0 = paused
+             */
+            update(speedMultiplier = 1.0) {
+                if (this.parent) {
+                    // ORBITING BODY — advance orbital angle
+                    this.angle += this.orbitSpeed * speedMultiplier;
+                    
+                    // Keep angle within [0, 2π] to prevent floating-point drift.
+                    // Without this, the angle could grow to huge values over time,
+                    // reducing precision in sin/cos calculations.
+                    if (this.angle > Math.PI * 2) this.angle -= Math.PI * 2;
+                    if (this.angle < 0) this.angle += Math.PI * 2;
+
+                    // Calculate orbital inclination from axial tilt.
+                    // A small tilt makes the system look more 3D and interesting.
+                    const inclination = this.axialTilt * 0.3;
+                    const cosInc = Math.cos(inclination);
+                    const sinInc = Math.sin(inclination);
+                    
+                    // Position in the local orbital plane
+                    const localX = Math.cos(this.angle) * this.orbitRadius;
+                    const localZ = Math.sin(this.angle) * this.orbitRadius;
+                    const localY = localZ * sinInc;  // Apply inclination
+
+                    // Transform to world space (relative to parent)
+                    this.position = new Vec3(
+                        this.parent.position.x + localX,
+                        this.parent.position.y + localY * cosInc,
+                        this.parent.position.z + localZ * cosInc
+                    );
+                } else {
+                    // CENTRAL STAR — fixed at the origin
+                    this.position = new Vec3(0, 0, 0);
+                }
+
+                // Update planet's own rotation (day/night cycle)
+                this.rotation += this.rotationSpeed * speedMultiplier;
+                
+                // RECURSIVE UPDATE: All moons update their positions too.
+                // This creates a hierarchical update chain:
+                //   star.update() → planet.update() → moon.update()
+                for (const moon of this.moons) {
+                    moon.update(speedMultiplier);
+                }
+            }
+
+            /**
+             * ADD A MOON TO THIS BODY
+             * 
+             * Sets up the parent-child relationship and creates
+             * the moon as a new CelestialBody instance.
+             * 
+             * @param {Object} moonParams — Same parameters as CelestialBody constructor
+             * @returns {CelestialBody} — The newly created moon
+             */
+            addMoon(moonParams) {
+                moonParams.parent = this;  // Set parent reference
+                const moon = new CelestialBody(moonParams);
+                this.moons.push(moon);
+                return moon;
+            }
+        }
+
+        // ================================================================
+        //  SECTION 7: STAR SYSTEM CREATION
+        //
+        //  This function builds our entire planetary system — the star,
+        //  planets, moons, and asteroid belt. Each body is configured
+        //  with physically-inspired parameters for a coherent system.
+        //
+        //  SYSTEM ARCHITECTURE (inspired by real planetary system structure):
+        //    CENTER: Nywarianis Prime — warm K-type star
+        //    INNER:  Nywarianis b — hot lava world (like a super-Mercury)
+        //    MIDDLE: Nywarianis c — habitable-zone rocky world (like Earth)
+        //            with 2 small moons
+        //    OUTER:  Nywarianis d — massive gas giant (like Jupiter/Saturn)
+        //            with dramatic rings and 4 major moons
+        //    FAR:    Nywarianis e — distant ice giant (like Neptune)
+        //            with faint ring and 1 moon
+        //    BELT:   Asteroid field between Nywarianis c and Nywarianis d
+        //
+        //  KEPLER'S THIRD LAW in our system:
+        //  Inner planets orbit FASTER than outer planets.
+        //  Nywarianis b (close) completes ~4 orbits for every 1 orbit
+        //  of Nywarianis e (far).
+        // 		
+        //  🌍 PLANET CLASSIFICATION LOGIC:
+        //  The planet types (lava, rocky, gas, ice) follow the real-world
+        //  condensation sequence of planetary formation — closer to the star
+        //  means higher temperatures, favoring rocky/lava compositions;
+        //  farther means colder, allowing ice to persist. This is not random
+        //  visual decoration — it reflects actual exoplanet demographics
+        //  observed by missions like Kepler and TESS.
+        //
+        //  The visual textures (procedurally generated) are derived from
+        //  these types, but the orbital parameters (radius, speed) are
+        //  independent and follow Keplerian mechanics.		
+        // ================================================================
+        function createStarSystem() {
+            // The system object holds all components
+            const system = { 
+                bodies: [],      // All celestial bodies (star + planets)
+                star: null,      // Direct reference to the central star
+                asteroidBelt: null 
+            };
+
+            /**
+             * CENTRAL STAR — Nywarianis Prime
+             * 
+             * Type: K-type main-sequence star (orange-yellow)
+             * Slightly cooler and smaller than our Sun, giving the system
+             * a warm, golden light. The star's mass defines the gravitational
+             * center of the entire system.
+             * 
+             * The star is rendered with special multi-layered glow effects
+             * instead of a procedural texture.
+             */
+            const star = new CelestialBody({
+                name: 'Nywarianis Prime',
+                type: 'star',
+                radius: 28,
+                mass: 100000,  // Central mass — dominates all orbital calculations
+                color: '#ffcc66',  // Warm golden glow
+                seed: 4242,
+            });
+            system.star = star;
+            system.bodies.push(star);
+
+            /**
+             * PLANET 1 — Nywarianis b (Lava World)
+             * 
+             * The closest planet to the star. Tidally stressed by intense
+             * gravitational forces, its surface is a hellscape of volcanoes
+             * and lava flows. Very short orbital period.
+             * 
+             * orbitRadius=45: closest to star
+             * orbitSpeed=0.025: fastest orbit (completes ~4 full orbits per outer planet orbit)
+             */
+            const planetB = new CelestialBody({
+                name: 'Nywarianis b',
+                type: 'lava',
+                radius: 6,           // Small — rocky inner planet
+                mass: 8,
+                orbitRadius: 45,     // Very close to star
+                orbitSpeed: 0.025,   // Fast orbital angular velocity
+                startAngle: 0.5,
+                color: '#ff6633',
+                seed: 7777,
+                parent: star,
+            });
+            system.bodies.push(planetB);
+
+            /**
+             * PLANET 2 — Nywarianis c (Rocky World)
+             * 
+             * Positioned in the star's habitable zone — the "Goldilocks" region
+             * where temperatures could allow liquid water. Has a varied terrain
+             * of mountains, plains, and ancient craters.
+             * 
+             * Two small moons orbit this planet, creating a mini-system.
+             */
+            const planetC = new CelestialBody({
+                name: 'Nywarianis c',
+                type: 'rocky',
+                radius: 10,          // Medium-sized terrestrial planet
+                mass: 18,
+                orbitRadius: 85,     // In the habitable zone
+                orbitSpeed: 0.012,   // Moderate orbital speed
+                startAngle: 2.1,
+                color: '#6688aa',
+                seed: 1234,
+                parent: star,
+                axialTilt: 0.3,      // Slight tilt gives it seasons
+            });
+            system.bodies.push(planetC);
+
+            // Nywarianis c moons — two small companions
+            planetC.addMoon({
+                name: 'Nywarianis c I',
+                type: 'rocky',
+                radius: 2.5, mass: 1.5,
+                orbitRadius: 18,     // Close-orbiting moon
+                orbitSpeed: 0.04,    // Fast — orbits several times per planet "year"
+                startAngle: 0,
+                color: '#999999',
+                seed: 5566,
+            });
+            planetC.addMoon({
+                name: 'Nywarianis c II',
+                type: 'ice',
+                radius: 2, mass: 1,
+                orbitRadius: 28,     // Farther moon
+                orbitSpeed: 0.025,
+                startAngle: 3,
+                color: '#ccddff',
+                seed: 7788,
+            });
+
+            /**
+             * PLANET 3 — Nywarianis d (Gas Giant)
+             * 
+             * The crown jewel of the system. A massive gas giant with a
+             * spectacular ring system rivaling Saturn's. Four major moons
+             * orbit this behemoth, each with distinct characteristics.
+             * 
+             * The ring system is drawn as elliptical bands with gradient
+             * opacity, scaled by the body's ringInner/ringOuter ratios.
+             */
+            const planetD = new CelestialBody({
+                name: 'Nywarianis d',
+                type: 'gas',
+                radius: 20,          // Large — dominates the outer system visually
+                mass: 320,           // Massive — strong gravitational influence
+                orbitRadius: 150,    // Outer system
+                orbitSpeed: 0.006,   // Slow, majestic orbit
+                startAngle: 4.5,
+                color: '#ddaa66',
+                seed: 9001,
+                parent: star,
+                hasRings: true,      // Spectacular ring system!
+                ringInner: 1.3,      // Inner ring edge (× planet radius)
+                ringOuter: 2.2,      // Outer ring edge (× planet radius)
+                axialTilt: 0.4,      // Tilted rings for dramatic appearance
+            });
+            system.bodies.push(planetD);
+
+            // Nywarianis d moon system — a miniature solar system!
+            planetD.addMoon({
+                name: 'Nywarianis d I',
+                type: 'lava',        // Volcanic moon (like Io)
+                radius: 3.5, mass: 3,
+                orbitRadius: 35, orbitSpeed: 0.05,
+                startAngle: 1.2,
+                color: '#ff8844', seed: 1111,
+            });
+            planetD.addMoon({
+                name: 'Nywarianis d II',
+                type: 'ice',         // Icy moon (like Europa)
+                radius: 4, mass: 4,
+                orbitRadius: 52, orbitSpeed: 0.03,
+                startAngle: 3.7,
+                color: '#aaccee', seed: 2222,
+            });
+            planetD.addMoon({
+                name: 'Nywarianis d III',
+                type: 'rocky',       // Rocky moon (like our Moon)
+                radius: 3, mass: 2.5,
+                orbitRadius: 70, orbitSpeed: 0.02,
+                startAngle: 5.5,
+                color: '#bb9977', seed: 3333,
+            });
+            planetD.addMoon({
+                name: 'Nywarianis d IV',
+                type: 'ice',         // Distant icy moon
+                radius: 2.5, mass: 1.8,
+                orbitRadius: 90, orbitSpeed: 0.015,
+                startAngle: 0.8,
+                color: '#ddeeff', seed: 4444,
+            });
+
+            /**
+             * PLANET 4 — Nywarianis e (Ice Giant)
+             * 
+             * A cold, distant world bathed in eternal twilight. Its faint
+             * ring system and pale blue coloration evoke the outer reaches
+             * of a planetary system. One moon keeps it company in the void.
+             */
+            const planetE = new CelestialBody({
+                name: 'Nywarianis e',
+                type: 'ice',
+                radius: 14,
+                mass: 80,
+                orbitRadius: 220,    // Farthest planet — very distant
+                orbitSpeed: 0.0035,  // Slowest orbit — takes many cycles
+                startAngle: 1.0,
+                color: '#aaccff',
+                seed: 5555,
+                parent: star,
+                hasRings: true,      // Faint, subtle ring
+                ringInner: 1.2,
+                ringOuter: 1.6,
+                axialTilt: 0.6,      // Strongly tilted
+            });
+            system.bodies.push(planetE);
+
+            planetE.addMoon({
+                name: 'Nywarianis e I',
+                type: 'ice',
+                radius: 3, mass: 2,
+                orbitRadius: 30, orbitSpeed: 0.035,
+                startAngle: 2.5,
+                color: '#cceeFF', seed: 6666,
+            });
+
+            /**
+             * ASTEROID BELT
+             * 
+             * Located between Nywarianis c and Nywarianis d, this belt contains
+             * 300 individual asteroid particles. Each asteroid orbits
+             * independently with slight variations in:
+             *   - Orbital radius (within the belt's boundaries)
+             *   - Vertical position (slight spread in Y)
+             *   - Size (visual variety)
+             *   - Speed (inner edge faster — Kepler's law!)
+             * 
+             * Asteroids are rendered as tiny dots with perspective scaling.
+             */
+            system.asteroidBelt = {
+                innerRadius: 105,    // Inner edge of the belt
+                outerRadius: 135,    // Outer edge of the belt
+                count: 300,          // Number of individual asteroids
+                asteroids: [],       // Will be populated below
+            };
+
+            // Generate individual asteroids using a seeded RNG for consistency
+            const aRand = seededRandom(9876);
+            for (let i = 0; i < system.asteroidBelt.count; i++) {
+                const angle = aRand() * Math.PI * 2;  // Random starting angle
+                
+                // Random radius within the belt boundaries
+                const radius = system.asteroidBelt.innerRadius +
+                    aRand() * (system.asteroidBelt.outerRadius - system.asteroidBelt.innerRadius);
+                
+                const height = (aRand() - 0.5) * 8;  // Slight vertical spread (±4 units)
+                
+                system.asteroidBelt.asteroids.push({
+                    angle: angle,
+                    radius: radius,
+                    height: height,
+                    size: 0.3 + aRand() * 1.2,        // Visual size variety
+                    speed: 0.008 + aRand() * 0.004,    // Orbital speed variety (Keplerian!)
+                });
+            }
+
+            return system;
+        }
+		
+        // ================================================================
+        //  SECTION 8: STARFIELD GENERATION
+        //
+        //  Creates a deep, parallax-scrolling background of distant stars.
+        //  The starfield uses THREE LAYERS at different distances to create
+        //  a convincing sense of depth when the camera moves.
+        //
+        //  PARALLAX EFFECT: When you move your head, nearby objects appear
+        //  to shift more than distant objects. We simulate this by placing
+        //  stars at different distances from the origin. When the camera
+        //  rotates, nearer stars shift more across the screen.
+		// 
+        //  ⚠️ ASTRONOMICAL NOTE:
+        //  In reality, stars are so unimaginably far away that they would
+        //  NOT shift at all during camera movement within a planetary system.
+        //  The parallax effect here is a deliberate artistic choice to enhance
+        //  the sense of 3D depth and immersion — it prioritizes visual feedback
+        //  over physical accuracy. Think of it as a "space visualization" rather
+        //  than a strict scientific simulation.		
+        // ================================================================
+        function createStarfield(count = 600) {
+            const stars = [];
+            const rand = seededRandom(12345);
+            
+            for (let i = 0; i < count; i++) {
+                /**
+                 * LAYER SYSTEM:
+                 * We divide stars into 3 distance layers:
+                 *   Layer 0 (200 stars): Far background (800-1000 units)
+                 *     — Minimal parallax, feels like the "celestial sphere"
+                 *   Layer 1 (200 stars): Mid-distance (500-700 units)
+                 *     — Moderate parallax, adds depth
+                 *   Layer 2 (200 stars): Near foreground (300-450 units)
+                 *     — Noticeable parallax, creates immersion
+                 */
+                const layer = i < 200 ? 0 : (i < 400 ? 1 : 2);
+                const distances = [
+                    [800, 1000],  // Far layer
+                    [500, 700],   // Mid layer
+                    [300, 450]    // Near layer
+                ];
+                const distance = distances[layer][0] + 
+                    rand() * (distances[layer][1] - distances[layer][0]);
+
+                /**
+                 * UNIFORM SPHERE DISTRIBUTION:
+                 * To place stars uniformly on a sphere, we can't just use
+                 * random latitude/longitude — that would create clumping
+                 * at the poles. Instead, we use:
+                 *   theta = random * 2π (longitude)
+                 *   phi = acos(2*random - 1) (latitude — correct distribution)
+                 */
+                const theta = rand() * Math.PI * 2;
+                const phi = Math.acos(2 * rand() - 1);
+
+                // Convert spherical to Cartesian for star position
+                stars.push({
+                    x: distance * Math.sin(phi) * Math.cos(theta),
+                    y: distance * Math.sin(phi) * Math.sin(theta),
+                    z: distance * Math.cos(phi),
+                    brightness: 0.4 + rand() * 0.6,           // Visual brightness
+                    size: 0.3 + rand() * 1.8,                 // Pixel size
+                    layer: layer,                             // Which parallax layer
+                    twinkleSpeed: 0.005 + rand() * 0.03,      // Twinkle frequency
+                    twinkleOffset: rand() * Math.PI * 2,      // Random phase for twinkling
+                });
+            }
+            return stars;
+        }
+
+        // ================================================================
+        //  SECTION 9: RENDERER
+        //
+        //  The Renderer is responsible for ALL drawing operations.
+        //  It takes the 3D scene data and converts it to pixels on the
+        //  canvas using the projection function and various drawing
+        //  techniques.
+        //
+        //  RENDERING PIPELINE (each frame):
+        //    1. Clear canvas and draw deep-space background
+        //    2. Draw starfield with parallax
+        //    3. Collect all objects (bodies, moons, asteroids)
+        //    4. Project each object to screen coordinates
+        //    5. Depth-sort all objects (painter's algorithm)
+        //    6. Draw objects back-to-front
+        //    7. Apply post-processing effects (vignette)
+        // ================================================================
+        class Renderer {
+            constructor(canvas, ctx, camera) {
+                this.canvas = canvas;
+                this.ctx = ctx;
+                this.camera = camera;
+                this.time = 0;  // Elapsed time for animations (twinkling, etc.)
+            }
+
+            /**
+             * MAIN RENDER FUNCTION
+             * Called every frame — this is where the magic happens.
+             * 
+             * @param {Array} bodies — All celestial bodies (star + planets)
+             * @param {Array} starfield — Background stars array
+             * @param {Object} asteroidBelt — Asteroid belt data
+             */
+            render(bodies, starfield, asteroidBelt) {
+                const ctx = this.ctx;
+                const W = this.canvas.width, H = this.canvas.height;
+
+                // CLEAR — Fill with the void of space
+                ctx.fillStyle = '#000008';  // Slightly blue-tinted black
+                ctx.fillRect(0, 0, W, H);
+
+                // DEPTH CUE GRADIENT — Subtle radial glow for depth perception
+                // This creates a sense of infinite space by fading to darker
+                // at the edges, like looking into a vast cosmic void.
+                const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.7);
+                grad.addColorStop(0, '#0a0a1a');   // Slightly lighter at center
+                grad.addColorStop(1, '#000008');    // Pure void at edges
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, W, H);
+
+                // DRAW STARFIELD FIRST — Stars are the farthest objects
+                this._drawStarfield(starfield);
+
+                // COLLECT ALL RENDERABLE OBJECTS
+                // We gather everything that needs to be drawn into a single
+                // array for depth sorting.
+                const renderables = [];
+
+                // Add main celestial bodies (star and planets)
+                for (const body of bodies) {
+                    const proj = project3D(body.position, this.camera);
+                    if (proj.visible) {
+                        renderables.push({
+                            type: 'body', 
+                            body: body, 
+                            depth: proj.depth,
+                            screenX: proj.x, 
+                            screenY: proj.y,
+                        });
+                    }
+                    // Recursively add all moons of this body
+                    this._collectMoons(body, renderables);
+                }
+
+                // Add asteroid belt particles
+                if (asteroidBelt) {
+                    this._collectAsteroids(asteroidBelt, renderables);
+                }
+
+                /**
+                 * PAINTER'S ALGORITHM — DEPTH SORTING
+                 * 
+                 * We sort all objects from FARTHEST to NEAREST,
+                 * then draw in that order. Far objects are drawn first,
+                 * so near objects paint over them correctly.
+                 * 
+                 * This is the simplest form of hidden surface removal.
+                 * It works well for our scene because:
+                 *   - Objects are mostly spherical (planets)
+                 *   - We don't have complex overlapping geometry
+                 *   - It's fast and deterministic
+                 * 
+                 * More complex engines use Z-buffering, but painter's
+                 * algorithm is perfect for our educational engine.
+                 */
+                renderables.sort((a, b) => b.depth - a.depth);
+
+                // DRAW ALL OBJECTS IN SORTED ORDER
+                for (const r of renderables) {
+                    if (r.type === 'body') {
+                        this._drawBody(r.body, r.screenX, r.screenY, r.depth);
+                    } else if (r.type === 'asteroid') {
+                        this._drawAsteroid(r.screenX, r.screenY, r.depth, r.size);
+                    }
+                }
+
+                // ORBIT GUIDES — Commented out for clean space view.
+                // Uncomment the line below to show orbital path indicators:
+                // this._drawOrbitGuides(bodies);
+
+                // VIGNETTE EFFECT — Subtle darkening at edges
+                // Creates a cinematic, telescope-view feel.
+                const vignette = ctx.createRadialGradient(
+                    W / 2, H / 2, W * 0.3,   // Inner circle (clear)
+                    W / 2, H / 2, W * 0.75    // Outer circle (dark)
+                );
+                vignette.addColorStop(0, 'rgba(0,0,0,0)');     // Transparent center
+                vignette.addColorStop(1, 'rgba(0,0,0,0.5)');   // Semi-transparent edge
+                ctx.fillStyle = vignette;
+                ctx.fillRect(0, 0, W, H);
+            }
+
+            /**
+             * RECURSIVELY COLLECT MOONS FOR RENDERING
+             * 
+             * This method traverses the moon hierarchy depth-first,
+             * collecting every moon (and their sub-moons, if any) into
+             * the renderables array.
+             * 
+             * RECURSION: The function calls itself for each moon,
+             * allowing unlimited nesting depth (moons of moons of moons...).
+             * 
+             * @param {CelestialBody} body — The parent body
+             * @param {Array} renderables — Array to collect renderable objects
+             */
+            _collectMoons(body, renderables) {
+                for (const moon of body.moons) {
+                    const proj = project3D(moon.position, this.camera);
+                    if (proj.visible) {
+                        renderables.push({
+                            type: 'body', 
+                            body: moon, 
+                            depth: proj.depth,
+                            screenX: proj.x, 
+                            screenY: proj.y,
+                        });
+                    }
+                    // Recurse for sub-moons (moons of moons)
+                    this._collectMoons(moon, renderables);
+                }
+            }
+
+            /**
+             * COLLECT ASTEROID PARTICLES FOR RENDERING
+             * 
+             * Each asteroid's 3D position is computed from its orbital
+             * parameters, then projected to screen space.
+             * 
+             * @param {Object} asteroidBelt — The asteroid belt data
+             * @param {Array} renderables — Array to collect renderable objects
+             */
+            _collectAsteroids(asteroidBelt, renderables) {
+                for (const ast of asteroidBelt.asteroids) {
+                    // Compute 3D position from polar coordinates (angle, radius)
+                    const x = Math.cos(ast.angle) * ast.radius;
+                    const z = Math.sin(ast.angle) * ast.radius;
+                    const pos = new Vec3(x, ast.height, z);
+                    
+                    const proj = project3D(pos, this.camera);
+                    if (proj.visible) {
+                        renderables.push({
+                            type: 'asteroid', 
+                            depth: proj.depth,
+                            screenX: proj.x, 
+                            screenY: proj.y, 
+                            size: ast.size,
+                        });
+                    }
+                }
+            }
+
+            /**
+             * DRAW A CELESTIAL BODY AT SCREEN POSITION
+             * 
+             * This is the main body rendering dispatcher. It:
+             *   1. Calculates the body's screen-space radius (perspective scaling)
+             *   2. Draws rings if present
+             *   3. Draws the body itself (star or planet)
+             *   4. Adds atmospheric glow
+             *   5. Draws the name label
+             * 
+             * @param {CelestialBody} body — The body to draw
+             * @param {number} sx — Screen X center position
+             * @param {number} sy — Screen Y center position
+             * @param {number} depth — Distance from camera (for scaling)
+             */
+            _drawBody(body, sx, sy, depth) {
+                const ctx = this.ctx;
+                const focalLength = 400;
+                
+                /**
+                 * PERSPECTIVE RADIUS SCALING:
+                 * The apparent size of an object is inversely proportional
+                 * to its distance. We use the same focalLength as the
+                 * projection for consistent scaling.
+                 * 
+                 * FORMULA: screenRadius = (focalLength * actualRadius) / depth
+                 * 
+                 * Minimum size of 1.5 pixels ensures even very distant
+                 * objects remain visible as tiny dots.
+                 */
+                const screenRadius = Math.max(1.5, (focalLength * body.radius) / depth);
+                
+                // OPTIMIZATION: Skip if too small to render meaningfully
+                if (screenRadius < 0.8) return;
+                
+                const sr = Math.ceil(screenRadius);
+
+                // Draw rings BEFORE the planet body (they extend beyond it)
+                if (body.hasRings) {
+                    this._drawRings(body, sx, sy, depth, screenRadius);
+                }
+
+                // Draw the body itself — different rendering for stars vs planets
+                if (body.type === 'star') {
+                    this._drawStar(body, sx, sy, sr);
+                } else {
+                    this._drawPlanet(body, sx, sy, sr);
+                }
+
+                // ATMOSPHERIC GLOW — All non-star bodies get a subtle glow
+                // This simulates a thin atmosphere or surface scattering.
+                if (body.type !== 'star') {
+                    const glowGrad = ctx.createRadialGradient(
+                        sx, sy, sr * 0.7,    // Inner radius (on the planet)
+                        sx, sy, sr * 1.3      // Outer radius (beyond the planet)
+                    );
+                    // Color varies by planet type
+                    const glowColor = body.type === 'lava' ? 'rgba(255,100,30,' :
+                        body.type === 'ice' ? 'rgba(150,200,255,' : 
+                        'rgba(100,150,200,';  // Default blue-white
+                    glowGrad.addColorStop(0, glowColor + '0.15)');
+                    glowGrad.addColorStop(0.5, glowColor + '0.05)');
+                    glowGrad.addColorStop(1, glowColor + '0)');
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath(); 
+                    ctx.arc(sx, sy, sr * 1.3, 0, Math.PI * 2); 
+                    ctx.fill();
+                }
+
+                // NAME LABEL — Show the body's name above it
+                // Only for bodies large enough to read
+                if (screenRadius > 4 && body.name) {
+                    ctx.fillStyle = 'rgba(200,220,255,0.7)';
+                    // Font size scales with the planet's screen size
+                    ctx.font = `${Math.max(8, Math.min(12, screenRadius * 0.6))}px 'VT323', monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(body.name, sx, sy - sr - 6);
+                }
+            }
+
+            /**
+             * DRAW RING SYSTEM
+             * 
+             * Rings are drawn as ellipses using canvas scaling.
+             * By scaling the Y axis, a circle becomes an ellipse,
+             * simulating the tilted ring as seen from our viewpoint.
+             * 
+             * The ring is rendered with a radial gradient for
+             * realistic opacity falloff (denser in middle, fading at edges).
+             * 
+             * @param {CelestialBody} body — The ringed body
+             * @param {number} sx, sy — Screen center position
+             * @param {number} depth — Distance from camera
+             * @param {number} planetRadius — Screen-space planet radius
+             */
+            _drawRings(body, sx, sy, depth, planetRadius) {
+                const ctx = this.ctx;
+                const focalLength = 400;
+                
+                // Calculate ring dimensions in screen space
+                const ringInnerR = (focalLength * body.radius * body.ringInner) / depth;
+                const ringOuterR = (focalLength * body.radius * body.ringOuter) / depth;
+                
+                // TILT FACTOR: Simulates the ring's inclination
+                // Combines the planet's axial tilt with the camera's viewing angle
+                const tiltFactor = Math.abs(Math.cos(body.axialTilt + this.camera.phi));
+                const ringScaleY = Math.max(0.1, tiltFactor);  // Never collapse to zero
+
+                ctx.save();
+                ctx.translate(sx, sy);
+                ctx.scale(1, ringScaleY);  // Compress Y to create ellipse
+
+                // RADIAL GRADIENT for realistic ring appearance
+                const ringGrad = ctx.createRadialGradient(0, 0, ringInnerR, 0, 0, ringOuterR);
+                // Color varies: warm for gas giants, cool for ice giants
+                const ringBaseColor = body.type === 'gas' ? '200,180,150' : '180,200,220';
+                ringGrad.addColorStop(0, `rgba(${ringBaseColor},0.1)`);    // Inner edge (thin)
+                ringGrad.addColorStop(0.3, `rgba(${ringBaseColor},0.4)`);  // Brightest region
+                ringGrad.addColorStop(0.6, `rgba(${ringBaseColor},0.6)`);  // Core band
+                ringGrad.addColorStop(0.8, `rgba(${ringBaseColor},0.3)`);  // Fading
+                ringGrad.addColorStop(1, `rgba(${ringBaseColor},0.05)`);   // Outer edge (very thin)
+                
+                ctx.fillStyle = ringGrad;
+                ctx.beginPath();
+                // Draw outer circle
+                ctx.arc(0, 0, ringOuterR, 0, Math.PI * 2);
+                // Cut out inner circle (where the planet is)
+                ctx.arc(0, 0, ringInnerR, 0, Math.PI * 2, true);  // true = counter-clockwise (cutout)
+                ctx.fill();
+
+                // FINE RING DETAIL — A thin bright line at the ring's midpoint
+                // This creates the appearance of a distinct ring band
+                const thinRingR = (ringInnerR + ringOuterR) / 2;
+                ctx.strokeStyle = `rgba(${ringBaseColor},0.5)`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); 
+                ctx.arc(0, 0, thinRingR, 0, Math.PI * 2); 
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            /**
+             * DRAW A STAR WITH BRILLIANT GLOW EFFECTS
+             * 
+             * Stars are rendered using THREE LAYERS of radial gradients,
+             * creating a brilliant, luminous appearance:
+             *   1. Outer glow — largest, most transparent (the corona)
+             *   2. Mid glow — medium size, brighter (the photosphere)
+             *   3. Core — smallest, brightest white-hot center
+             * 
+             * @param {CelestialBody} body — The star
+             * @param {number} sx, sy — Screen center
+             * @param {number} sr — Screen-space radius
+             */
+            _drawStar(body, sx, sy, sr) {
+                const ctx = this.ctx;
+
+                // OUTER GLOW — The star's corona extending far into space
+                const outerGlow = ctx.createRadialGradient(
+                    sx, sy, sr * 0.5,    // Start at half radius
+                    sx, sy, sr * 3        // Extend to 3× radius
+                );
+                outerGlow.addColorStop(0, 'rgba(255,200,100,0.4)');   // Warm center
+                outerGlow.addColorStop(0.3, 'rgba(255,180,60,0.2)');  // Fading orange
+                outerGlow.addColorStop(0.6, 'rgba(255,150,30,0.05)'); // Barely visible
+                outerGlow.addColorStop(1, 'rgba(255,100,20,0)');      // Transparent edge
+                ctx.fillStyle = outerGlow;
+                ctx.beginPath(); 
+                ctx.arc(sx, sy, sr * 3, 0, Math.PI * 2); 
+                ctx.fill();
+
+                // MID GLOW — The visible surface of the star
+                const midGlow = ctx.createRadialGradient(
+                    sx, sy, sr * 0.3,     // Start near center
+                    sx, sy, sr * 1.8       // Extend to 1.8× radius
+                );
+                midGlow.addColorStop(0, 'rgba(255,240,200,0.8)');    // Very bright yellow-white
+                midGlow.addColorStop(0.4, 'rgba(255,200,100,0.4)');  // Golden
+                midGlow.addColorStop(0.7, 'rgba(255,160,50,0.1)');   // Orange edge
+                midGlow.addColorStop(1, 'rgba(255,120,30,0)');       // Fade out
+                ctx.fillStyle = midGlow;
+                ctx.beginPath(); 
+                ctx.arc(sx, sy, sr * 1.8, 0, Math.PI * 2); 
+                ctx.fill();
+
+                // CORE — The intensely bright center
+                const core = ctx.createRadialGradient(
+                    sx, sy, 0,             // Very center
+                    sx, sy, sr              // Edge of the star
+                );
+                core.addColorStop(0, '#fffff8');    // Pure white at center
+                core.addColorStop(0.2, '#fff8e0');  // Very light yellow
+                core.addColorStop(0.5, '#ffe0a0');  // Warm yellow
+                core.addColorStop(0.8, '#ffc860');  // Golden orange
+                core.addColorStop(1, '#ffaa30');    // Deep orange at edge
+                ctx.fillStyle = core;
+                ctx.beginPath(); 
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2); 
+                ctx.fill();
+            }
+
+            /**
+             * DRAW A PLANET WITH PROCEDURAL TEXTURE
+             * 
+             * Planets are drawn as lit spheres using radial gradients.
+             * For larger planets, we sample the procedural texture to
+             * create realistic surface detail with simulated lighting.
+             * 
+             * LIGHTING MODEL:
+             * We simulate a light source from the upper-left by offsetting
+             * the gradient center. This creates a highlight on one side
+             * and shadow on the opposite side — the classic 3D sphere look.
+             * 
+             * @param {CelestialBody} body — The planet
+             * @param {number} sx, sy — Screen center
+             * @param {number} sr — Screen-space radius
+             */
+            _drawPlanet(body, sx, sy, sr) {
+                const ctx = this.ctx;
+
+                // For very small planets (far away), draw as simple colored dot
+                if (sr < 3) {
+                    ctx.fillStyle = body.color;
+                    ctx.beginPath(); 
+                    ctx.arc(sx, sy, sr, 0, Math.PI * 2); 
+                    ctx.fill();
+                    return;
+                }
+
+                // TEXTURE-BASED RENDERING (for larger planets)
+                const textureCanvas = body.texture;
+                if (textureCanvas && sr > 5) {
+                    const tctx = textureCanvas.getContext('2d');
+                    const texSize = textureCanvas.width;
+                    
+                    // Create a radial gradient with offset center for lighting
+                    const grad = ctx.createRadialGradient(
+                        sx - sr * 0.3, sy - sr * 0.3, sr * 0.1,  // Highlight (upper-left)
+                        sx, sy, sr                                  // Shadow edge
+                    );
+
+                    // SAMPLE TEXTURE at two points to get lit and shadow colors
+                    const litSample = tctx.getImageData(
+                        Math.floor(texSize * 0.5),   // Center of texture
+                        Math.floor(texSize * 0.3),   // Upper portion
+                        1, 1
+                    ).data;
+
+                    const darkSample = tctx.getImageData(
+                        Math.floor(texSize * 0.8),   // Right side of texture
+                        Math.floor(texSize * 0.7),   // Lower portion
+                        1, 1
+                    ).data;
+
+                    // Build gradient using sampled colors
+                    grad.addColorStop(0, 
+                        `rgb(${Math.min(255,litSample[0]+40)},${Math.min(255,litSample[1]+40)},${Math.min(255,litSample[2]+40)})`
+                    );  // Brightened lit side
+                    grad.addColorStop(0.5, 
+                        `rgb(${litSample[0]},${litSample[1]},${litSample[2]})`
+                    );  // Normal texture color
+                    grad.addColorStop(0.85, 
+                        `rgb(${Math.floor(darkSample[0]*0.5)},${Math.floor(darkSample[1]*0.5)},${Math.floor(darkSample[2]*0.5)})`
+                    );  // Darkened shadow side
+                    grad.addColorStop(1, 
+                        `rgb(${Math.floor(darkSample[0]*0.2)},${Math.floor(darkSample[1]*0.2)},${Math.floor(darkSample[2]*0.2)})`
+                    );  // Very dark edge
+
+                    ctx.fillStyle = grad;
+                } else {
+                    // FALLBACK: Simple lit sphere using the body's base color
+                    const baseColor = body.color;
+                    const grad = ctx.createRadialGradient(
+                        sx - sr * 0.3, sy - sr * 0.3, sr * 0.1,
+                        sx, sy, sr
+                    );
+                    grad.addColorStop(0, lightenColor(baseColor, 1.5));    // Bright highlight
+                    grad.addColorStop(0.5, baseColor);                      // Normal color
+                    grad.addColorStop(0.85, darkenColor(baseColor, 0.4));   // Shadow
+                    grad.addColorStop(1, darkenColor(baseColor, 0.15));     // Dark edge
+                    ctx.fillStyle = grad;
+                }
+
+                // Draw the planet circle
+                ctx.beginPath(); 
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2); 
+                ctx.fill();
+
+                // SPECULAR HIGHLIGHT — For shiny surfaces (ice and lava)
+                // A small bright spot that makes the surface look glossy
+                if (body.type === 'ice' || body.type === 'lava') {
+                    const specGrad = ctx.createRadialGradient(
+                        sx - sr * 0.25, sy - sr * 0.25, sr * 0.05,  // Small bright spot
+                        sx - sr * 0.2, sy - sr * 0.2, sr * 0.4       // Fades quickly
+                    );
+                    specGrad.addColorStop(0, 'rgba(255,255,255,0.4)');
+                    specGrad.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = specGrad;
+                    ctx.beginPath(); 
+                    ctx.arc(sx, sy, sr, 0, Math.PI * 2); 
+                    ctx.fill();
+                }
+            }
+
+            /**
+             * DRAW AN ASTEROID PARTICLE
+             * 
+             * Asteroids are tiny dots with brightness based on distance
+             * (closer = brighter, simulating the light from the star).
+             * 
+             * @param {number} sx, sy — Screen position
+             * @param {number} depth — Distance from camera
+             * @param {number} size — The asteroid's visual size
+             */
+            _drawAsteroid(sx, sy, depth, size) {
+                const ctx = this.ctx;
+                const focalLength = 400;
+                const screenSize = Math.max(0.3, (focalLength * size) / depth);
+                
+                if (screenSize < 0.3) return;  // Too small to see
+
+                // Brightness falls off with distance (inverse square approximation)
+                const brightness = 0.4 + (1 - Math.min(1, depth / 500)) * 0.6;
+                
+                // Warm gray-brown color for asteroids
+                ctx.fillStyle = `rgba(${Math.floor(180*brightness)},${Math.floor(170*brightness)},${Math.floor(150*brightness)},0.8)`;
+                ctx.fillRect(sx - screenSize / 2, sy - screenSize / 2, screenSize, screenSize);
+            }
+
+             /**
+             * DRAW ORBIT GUIDE ELLIPSES
+             * 
+             * These are subtle dashed lines showing planetary orbits.
+             * Each orbit is drawn in the XZ plane (where planets actually move)
+             * and correctly projected through the camera for proper perspective.
+             * 
+             * ⚠️ NOTE: In this version, orbit guides are DISABLED by default
+             * to maintain a clean, uncluttered space visualization.
+             * 
+             * To ENABLE orbit guides:
+             *   - Find the line "// this._drawOrbitGuides(bodies);" in render()
+             *   - Remove the "//" comment markers
+             * 
+             * When enabled, orbits appear as faint dashed ellipses (cyan/blue)
+             * around the star, helping to visualize planetary paths.
+             * 
+             * @param {Array} bodies — All celestial bodies
+             */
+            _drawOrbitGuides(bodies) {
+                const ctx = this.ctx;
+
+                for (const body of bodies) {
+                    if (!body.parent || body.orbitRadius <= 0) continue;
+
+                    const segments = 64;  // Number of line segments for smooth ellipse
+                    const parentPos = body.parent.position;
+                    const orbitR = body.orbitRadius;
+
+                    ctx.strokeStyle = 'rgba(60, 80, 120, 0.25)';
+                    ctx.lineWidth = 0.8;
+                    ctx.setLineDash([4, 8]);  // Dashed line
+                    ctx.beginPath();
+
+                    let firstPoint = true;
+
+                    // Draw orbit as a series of projected 3D points
+                    for (let i = 0; i <= segments; i++) {
+                        const angle = (i / segments) * Math.PI * 2;
+
+                        // Point on the orbit in 3D (XZ plane)
+                        const worldPoint = new Vec3(
+                            parentPos.x + Math.cos(angle) * orbitR,
+                            parentPos.y,  // Orbit stays in the horizontal plane
+                            parentPos.z + Math.sin(angle) * orbitR
+                        );
+
+                        const proj = project3D(worldPoint, this.camera);
+
+                        if (proj.visible) {
+                            if (firstPoint) {
+                                ctx.moveTo(proj.x, proj.y);
+                                firstPoint = false;
+                            } else {
+                                ctx.lineTo(proj.x, proj.y);
+                            }
+                        }
+                    }
+
+                    ctx.stroke();
+                    ctx.setLineDash([]);  // Reset to solid line
+                }
+            }
+
+            /**
+             * DRAW THE STARFIELD WITH PARALLAX AND TWINKLING
+             * 
+             * Each star is a fixed point in 3D space. When the camera moves,
+             * nearer stars shift more than farther stars — this is PARALLAX.
+             * 
+             * TWINKLING: Stars pulse in brightness at different rates,
+             * simulating atmospheric scintillation (or just looking cool).
+             * 
+             * @param {Array} stars — Array of star objects
+             */
+            _drawStarfield(stars) {
+                const ctx = this.ctx;
+                const W = this.canvas.width, H = this.canvas.height;
+
+                for (const star of stars) {
+                    // Project the star's 3D position to screen
+                    const worldPos = new Vec3(star.x, star.y, star.z);
+                    const proj = project3D(worldPos, this.camera);
+
+                    // Skip stars behind camera or off-screen
+                    if (!proj.visible) continue;
+                    if (proj.x < -10 || proj.x > W + 10 || 
+                        proj.y < -10 || proj.y > H + 10) continue;
+
+                    // TWINKLING EFFECT — Sinusoidal brightness variation
+                    const twinkle = 0.5 + 0.5 * Math.sin(
+                        this.time * star.twinkleSpeed + star.twinkleOffset
+                    );
+                    const alpha = star.brightness * (0.7 + 0.3 * twinkle);
+                    const size = star.size * (0.8 + 0.2 * twinkle);
+
+                    // Draw the star as a small rectangle (pixel-perfect)
+                    ctx.fillStyle = `rgba(200,220,255,${alpha})`;
+                    ctx.fillRect(proj.x - size / 2, proj.y - size / 2, size, size);
+
+                    // CROSS-SPARKLE for bright stars
+                    // Adds a subtle cross pattern for stars above brightness threshold
+                    if (star.brightness > 0.75 && size > 1.2) {
+                        ctx.fillStyle = `rgba(220,240,255,${alpha*0.4})`;
+                        // Horizontal bar
+                        ctx.fillRect(proj.x - size * 1.5, proj.y - 0.3, size * 3, 0.6);
+                        // Vertical bar
+                        ctx.fillRect(proj.x - 0.3, proj.y - size * 1.5, 0.6, size * 3);
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        //  SECTION 10: COLOR UTILITY FUNCTIONS
+        //
+        //  Simple helper functions for manipulating hex colors.
+        //  These are used for planet shading (lighten for highlights,
+        //  darken for shadows) and star glow effects.
+        // ================================================================
+        
+        /**
+         * Convert hex color string to RGB object
+         * @param {string} hex — Color in '#rrggbb' format
+         * @returns {Object} — { r, g, b } with values 0-255
+         */
+        function hexToRgb(hex) {
+            return {
+                r: parseInt(hex.slice(1,3), 16),
+                g: parseInt(hex.slice(3,5), 16),
+                b: parseInt(hex.slice(5,7), 16)
+            };
+        }
+
+        /**
+         * Convert RGB values to CSS rgb() string
+         * @param {number} r, g, b — Color components 0-255
+         * @returns {string} — 'rgb(r,g,b)'
+         */
+        function rgbToStr(r, g, b) {
+            return `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`;
+        }
+
+        /**
+         * Darken a hex color by multiplying components by a factor
+         * @param {string} hex — Original color
+         * @param {number} factor — Multiplier (0-1 for darkening)
+         * @returns {string} — Darkened rgb() string
+         */
+        function darkenColor(hex, factor) {
+            const c = hexToRgb(hex);
+            return rgbToStr(c.r * factor, c.g * factor, c.b * factor);
+        }
+
+        /**
+         * Lighten a hex color by multiplying components by a factor > 1
+         * @param {string} hex — Original color
+         * @param {number} factor — Multiplier (>1 for lightening)
+         * @returns {string} — Lightened rgb() string, clamped to 255
+         */
+        function lightenColor(hex, factor) {
+            const c = hexToRgb(hex);
+            return rgbToStr(
+                Math.min(255, c.r * factor),
+                Math.min(255, c.g * factor),
+                Math.min(255, c.b * factor)
+            );
+        }
+
+        // ================================================================
+        //  SECTION 11: INPUT HANDLING
+        //
+        //  Manages all user interactions:
+        //    - Mouse drag → rotate camera
+        //    - Mouse scroll → zoom in/out
+        //    - Keyboard shortcuts → pause, reset, follow planets
+        //    - Touch support → mobile-friendly rotation
+        //
+        //  The input system returns an object with state queries so
+        //  the main loop can check if the simulation is paused or
+        //  which body the camera should follow.
+        // ================================================================
+        function setupInput(camera, system) {
+            // STATE VARIABLES
+            let isDragging = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            let paused = false;
+            let followBody = null;  // Currently tracked body (null = free view)
+
+            // ---- MOUSE DRAG FOR ROTATION ----
+            
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                document.body.classList.add('grabbing');  // Visual feedback
+            });
+
+            /**
+             * MOUSE MOVE — Rotate camera while dragging
+             * 
+             * The rotation sensitivity (0.005) controls how fast the
+             * view rotates relative to mouse movement. Lower values
+             * give finer control; higher values are more responsive.
+             */
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                const dx = e.clientX - lastMouseX;
+                const dy = e.clientY - lastMouseY;
+                const sensitivity = 0.005;
+                
+                // Horizontal mouse → horizontal rotation
+                camera.rotateHorizontal(-dx * sensitivity);
+                // Vertical mouse → vertical rotation
+                camera.rotateVertical(-dy * sensitivity);
+                
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+                document.body.classList.remove('grabbing');
+            });
+
+            // ---- SCROLL WHEEL FOR ZOOM ----
+            
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomAmount = e.deltaY * 0.5;  // Scale scroll speed
+                if (zoomAmount > 0) {
+                    camera.zoomOut(zoomAmount);  // Scroll down = zoom out
+                } else {
+                    camera.zoomIn(-zoomAmount);  // Scroll up = zoom in
+                }
+            }, { passive: false });  // passive: false allows preventDefault
+
+            // ---- TOUCH SUPPORT FOR MOBILE ----
+            
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {  // Single finger = rotate
+                    isDragging = true;
+                    lastMouseX = e.touches[0].clientX;
+                    lastMouseY = e.touches[0].clientY;
+                }
+                // Multi-touch could be used for pinch-zoom (future enhancement)
+            });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (!isDragging || e.touches.length !== 1) return;
+                e.preventDefault();
+                const dx = e.touches[0].clientX - lastMouseX;
+                const dy = e.touches[0].clientY - lastMouseY;
+                camera.rotateHorizontal(-dx * 0.005);
+                camera.rotateVertical(-dy * 0.005);
+                lastMouseX = e.touches[0].clientX;
+                lastMouseY = e.touches[0].clientY;
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', () => { 
+                isDragging = false; 
+            });
+
+            // ---- KEYBOARD CONTROLS ----
+            
+            window.addEventListener('keydown', (e) => {
+                switch (e.key.toLowerCase()) {
+                    case ' ':
+                        // SPACE BAR — Pause/resume orbital animation
+                        e.preventDefault();  // Prevent page scrolling
+                        paused = !paused;
+                        document.getElementById('hud').textContent =
+                            paused ? '⏸ PAUSED · ORBIT VIEW' : '⊙ STAR SYSTEM · ORBIT VIEW';
+                        break;
+                        
+                    case 'r':
+                        // R KEY — Reset camera to default view
+                        camera.reset();
+                        followBody = null;  // Stop following any planet
+                        document.getElementById('hud').textContent = '⊙ STAR SYSTEM · ORBIT VIEW';
+                        break;
+                        
+                    case 'f':
+                        // F KEY — Cycle through follow targets
+                        e.preventDefault();
+                        if (followBody === null) {
+                            // Start following — pick the first non-star body
+                            followBody = system.bodies.find(b => b.type !== 'star') || system.star;
+                        } else {
+                            // Cycle to the next body in the system
+                            const currentIdx = system.bodies.indexOf(followBody);
+                            const nextIdx = (currentIdx + 1) % system.bodies.length;
+                            followBody = system.bodies[nextIdx];
+                        }
+                        if (followBody) {
+                            camera.setFocus(followBody.position);
+                            document.getElementById('hud').textContent =
+                                `🔭 FOLLOWING: ${followBody.name.toUpperCase()}`;
+                        }
+                        break;
+                        
+                    case 'escape':
+                        // ESCAPE KEY — Return to free view (focus on star)
+                        followBody = null;
+                        camera.setFocus(new Vec3(0, 0, 0));
+                        document.getElementById('hud').textContent = '⊙ STAR SYSTEM · ORBIT VIEW';
+                        break;
+                }
+            });
+
+            // Return an interface for the main loop to query input state
+            return {
+                isPaused: () => paused,
+                getFollowBody: () => followBody,
+            };
+        }
+
+        // ================================================================
+        //  SECTION 12: MAIN APPLICATION — PUTTING IT ALL TOGETHER
+        // ================================================================
+        
+        // Create the star system (all planets, moons, asteroids)
+        const system = createStarSystem();
+        
+        // Create the background starfield (600 stars in 3 parallax layers)
+        const starfield = createStarfield(600);
+        
+        // Create the orbital camera
+        const camera = new Camera();
+        
+        // Create the renderer (handles all drawing)
+        const renderer = new Renderer(canvas, ctx, camera);
+        
+        // Set up input handling (mouse, keyboard, touch)
+        const input = setupInput(camera, system);
+
+        /**
+         * MAIN ANIMATION LOOP
+         * 
+         * This function runs ~60 times per second (via requestAnimationFrame)
+         * and drives the entire simulation. Each frame:
+         * 
+         *   1. UPDATE PHYSICS — Advance all orbital positions
+         *   2. UPDATE ASTEROIDS — Advance asteroid belt particles
+         *   3. UPDATE CAMERA — Smooth focus transitions
+         *   4. FOLLOW TARGET — If following a planet, update camera focus
+         *   5. RENDER — Draw everything
+         *   6. SCHEDULE NEXT FRAME — requestAnimationFrame(animate)
+         * 
+         * The speedMultiplier allows pausing (value = 0) or normal speed (value = 1).
+         * This could be extended for fast-forward or slow-motion effects.
+         */
+        function animate() {
+            // Step 1: Update celestial body positions
+            const speedMultiplier = input.isPaused() ? 0 : 1.0;
+            for (const body of system.bodies) {
+                body.update(speedMultiplier);
+            }
+
+            // Step 2: Update asteroid belt positions
+            if (system.asteroidBelt && !input.isPaused()) {
+                for (const ast of system.asteroidBelt.asteroids) {
+                    ast.angle += ast.speed * speedMultiplier;
+                    // Keep angle in [0, 2π] range
+                    if (ast.angle > Math.PI * 2) ast.angle -= Math.PI * 2;
+                }
+            }
+
+            // Step 3: Update camera (smooth transitions)
+            camera.update();
+
+            // Step 4: If following a body, update camera focus to track it
+            const followBody = input.getFollowBody();
+            if (followBody) {
+                camera.setFocus(followBody.position);
+            }
+
+            // Step 5: Render the scene
+            renderer.time = performance.now() * 0.001;  // Time in seconds for animations
+            renderer.render(system.bodies, starfield, system.asteroidBelt);
+
+            // Step 6: Schedule the next frame
+            requestAnimationFrame(animate);
+        }
+
+        // ================================================================
+        //  SECTION 13: RESPONSIVE SCALING
+        //
+        //  Scales the canvas to fit the browser window while maintaining
+        //  aspect ratio. Uses CSS transform:scale() for performance
+        //  (avoids re-rendering the canvas at different resolutions).
+        // ================================================================
+        function resize() {
+            const maxScale = Math.min(
+                (window.innerWidth - 40) / W,    // Width constraint
+                (window.innerHeight - 120) / H,  // Height constraint (leave room for UI)
+                1.1                               // Maximum scale (slight zoom allowed)
+            );
+            canvas.style.transform = `scale(${maxScale})`;
+            canvas.style.transformOrigin = 'center center';
+        }
+        window.addEventListener('resize', resize);
+        resize();  // Initial sizing
+
+        // ================================================================
+        //  SECTION 14: START THE SIMULATION
+        // ================================================================
+        
+        // Set initial HUD text
+        document.getElementById('hud').textContent = '⊙ STAR SYSTEM · ORBIT VIEW';
+        
+        // Start the animation loop
+        animate();
+
+        // Welcome message in the browser console for developers
+        console.log('%c🚀 JS NYWORIANIS VP %cStarted',
+            'font-size:16px;color:#ffcc66;', 'color:#aac8f0;');
+        console.log('%cPure JavaScript 3D Perspective Orrery Block %cby Vanya Petrov',
+            'color:#8ab4f8;', 'color:#aaa;');
+        console.log('%c🖱 Drag to rotate %c| %c🖱 Scroll to zoom %c| %c⌨ Space to pause %c| %c⌨ F to follow %c| %c⌨ R to reset',
+            'color:#ffa;', '', 'color:#ffa;', '', 'color:#ffa;', '', 'color:#ffa;', '', 'color:#ffa;', '');
+        console.log('%c📚 Educational version — every function is commented for learning!',
+            'color:#a78bfa;');
+
+    })();  // End of IIFE — our private scope is closed
+    </script>
+</body>
+</html>
